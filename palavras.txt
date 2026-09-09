@@ -1,0 +1,5 @@
+# Uma palavra-chave por linha. Linhas começando com # são ignoradas.
+emagrecimento
+perder barriga
+perder peso
+antes e depois emagrecimento
