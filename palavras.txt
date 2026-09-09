@@ -1,5 +1,3 @@
-# Uma palavra-chave por linha. Linhas começando com # são ignoradas.
-emagrecimento
 perder barriga
+secar barriga
 perder peso
-antes e depois emagrecimento

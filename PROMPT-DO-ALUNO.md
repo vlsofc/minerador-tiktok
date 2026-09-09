@@ -98,7 +98,8 @@ dólar com vírgula decimal. Lê `palavras.txt` (uma por linha, ignora linhas co
 
 `config.json` padrão:
 `{"resultados_por_palavra": 50, "periodo": "LAST_6_MONTHS",
-"ordenar_busca_por": "MOST_LIKED", "pais": "", "views_minimas": 100000,
+"ordenar_busca_por": "MOST_LIKED", "pais": "", "idiomas": ["pt"],
+"paises": ["BR"], "views_minimas": 100000,
 "likes_minimos": 0, "duracao_minima_s": 5, "duracao_maxima_s": 90,
 "ignorar_anuncios": true, "ignorar_slideshows": true, "top_por_palavra": 20}`
 
@@ -118,15 +119,18 @@ mais 0,0013 se tiver país, mais 0,001 por run. Mostre antes de rodar.
 
 **filtrar**: campos de cada item: `id`, `text`, `createTimeISO`,
 `webVideoUrl`, `playCount`, `diggCount`, `commentCount`, `shareCount`,
-`collectCount`, `isAd`, `isSlideshow`, `authorMeta.name`, `authorMeta.fans`,
-`videoMeta.duration`. Vídeo achado por mais de uma palavra conta uma vez, na
+`collectCount`, `isAd`, `isSlideshow`, `textLanguage`, `locationCreated`,
+`authorMeta.name`, `authorMeta.fans`, `videoMeta.duration`. Vídeo passa no
+filtro de idioma se `textLanguage` está em `idiomas` ou `locationCreated`
+está em `paises`; listas vazias desligam esse filtro. Vídeo achado por mais de uma palavra conta uma vez, na
 primeira, e as outras palavras vão na coluna `tambem_achado_por`. Reprove por
 anúncio, slideshow, views, likes e duração conforme o config. Ordene por
 views, guarde os `top_por_palavra` de cada palavra com um `rank`. Salve
 `resultados/aprovados.json` (só os do top) e duas planilhas:
 `resultados/planilha_melhores.csv` com colunas palavra, rank, views, likes,
 comentarios, shares, salvos, engajamento_pct, duracao_s, data, autor,
-seguidores, texto, url, tambem_achado_por; e `resultados/planilha_restante.csv`
+idioma, pais, seguidores, texto, url, tambem_achado_por; e
+`resultados/planilha_restante.csv`
 com todos os outros vídeos do bruto, mesmas colunas mas com `motivo` no lugar
 de `rank` ("reprovado: views abaixo de 100K", "aprovado, fora do top 20").
 Nenhum vídeo do bruto pode ficar fora das duas planilhas. Imprima a tabela

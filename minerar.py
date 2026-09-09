@@ -62,6 +62,8 @@ CONFIG_PADRAO = {
     "periodo": "LAST_6_MONTHS",
     "ordenar_busca_por": "MOST_LIKED",
     "pais": "",
+    "idiomas": ["pt"],
+    "paises": ["BR"],
     "views_minimas": 100000,
     "likes_minimos": 0,
     "duracao_minima_s": 5,
@@ -265,6 +267,8 @@ def normalizar(item):
         "engajamento_pct": round(engaj, 2),
         "duracao_s": video.get("duration") or 0,
         "data": (item.get("createTimeISO") or "")[:10],
+        "idioma": item.get("textLanguage") or "",
+        "pais": item.get("locationCreated") or "",
         "autor": autor.get("name") or "",
         "seguidores": autor.get("fans") or 0,
         "texto": (item.get("text") or "").replace("\n", " ").strip(),
@@ -295,7 +299,12 @@ def filtrar(config):
         v["tambem_achado_por"] = []
         vistos[v["id"]] = v
 
+    idiomas, paises = config.get("idiomas") or [], config.get("paises") or []
+
     def motivo_reprovacao(v):
+        # Passa se o texto está num idioma aceito OU o vídeo foi criado num país aceito.
+        if (idiomas or paises) and not (v["idioma"] in idiomas or v["pais"] in paises):
+            return "idioma %s / país %s" % (v["idioma"] or "?", v["pais"] or "?")
         if config["ignorar_anuncios"] and v["anuncio"]:
             return "anúncio"
         if config["ignorar_slideshows"] and v["slideshow"]:
@@ -332,7 +341,8 @@ def filtrar(config):
             v["motivo"] = "aprovado, fora do top %d" % config["top_por_palavra"]
             restante.append(v)
         for v in sorted(grupo["reprovados"], key=lambda x: x["views"], reverse=True):
-            motivos[v["motivo"]] = motivos.get(v["motivo"], 0) + 1
+            resumo = "idioma/país fora do filtro" if v["motivo"].startswith("reprovado: idioma") else v["motivo"]
+            motivos[resumo] = motivos.get(resumo, 0) + 1
             restante.append(v)
         brutos_palavra = len(aprovados) + len(grupo["reprovados"])
         taxa = len(aprovados) / brutos_palavra * 100 if brutos_palavra else 0
@@ -350,7 +360,7 @@ def filtrar(config):
     with open(ARQ_APROVADOS, "w", encoding="utf-8") as f:
         json.dump(melhores, f, ensure_ascii=False, indent=1)
     metricas = ["views", "likes", "comentarios", "shares", "salvos", "engajamento_pct",
-                "duracao_s", "data", "autor", "seguidores", "texto", "url", "tambem_achado_por"]
+                "duracao_s", "data", "idioma", "pais", "autor", "seguidores", "texto", "url", "tambem_achado_por"]
     escrever_csv(ARQ_MELHORES, ["palavra", "rank"] + metricas, melhores)
     escrever_csv(ARQ_RESTANTE, ["palavra", "motivo"] + metricas, restante)
     print("Melhores: %d vídeos em %s" % (len(melhores), os.path.relpath(ARQ_MELHORES, PASTA)))

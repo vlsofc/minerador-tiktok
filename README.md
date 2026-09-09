@@ -34,6 +34,13 @@ python3 minerar.py baixar     # grátis, vídeos em videos/<palavra>/
 - Vídeo achado por mais de uma palavra aparece uma vez, com as outras
   palavras na coluna `tambem_achado_por`.
 
+## Filtro de idioma e país
+
+Sem proxy, a busca do TikTok devolve muito conteúdo em espanhol e inglês
+para termos como "perder peso". O filtro local aceita o vídeo se o texto está
+num dos `idiomas` ou se foi criado num dos `paises` do `config.json`. Padrão:
+português ou Brasil. Listas vazias desligam o filtro.
+
 ## Custo
 
 Actor `clockworks/tiktok-scraper`, plano gratuito da Apify em 09/2026:
