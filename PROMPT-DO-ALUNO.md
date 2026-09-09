@@ -112,13 +112,18 @@ dólar com vírgula decimal. Lê `palavras.txt` (uma por linha, ignora linhas co
 `config.json` e o token de `.env` ou da variável `APIFY_TOKEN`.
 
 `config.json` padrão:
-`{"resultados_por_palavra": 50, "periodo": "LAST_6_MONTHS",
-"ordenar_busca_por": "MOST_LIKED", "pais": "BR", "idiomas": [],
-"paises": [], "views_minimas": 100000,
+`{"modo": "busca", "resultados_por_palavra": 50, "periodo": "ALL_TIME",
+"ordenar_busca_por": "MOST_RELEVANT", "idade_maxima_meses": 6, "pais": "BR",
+"idiomas": [], "paises": [], "views_minimas": 100000,
 "likes_minimos": 0, "duracao_minima_s": 5, "duracao_maxima_s": 90,
 "ignorar_anuncios": true, "ignorar_slideshows": true, "top_por_palavra": 20}`
 
 **buscar**: um run da Apify por palavra, actor `clockworks~tiktok-scraper`.
+Importante: a busca vai SEM filtro de data e por relevância. O filtro de data
+do TikTok devolve um poço raso de vídeos fracos; a idade é filtrada depois,
+localmente, por `idade_maxima_meses`. Se `modo` for "hashtag", a entrada é
+`{"hashtags": [palavra sem espaços e sem #], "resultsPerPage": N,
+"proxyCountryCode": pais, "shouldDownloadVideos": false}`.
 `POST https://api.apify.com/v2/acts/clockworks~tiktok-scraper/runs?token=TOKEN`
 com JSON `{"searchQueries": [palavra], "searchSection": "/video",
 "resultsPerPage": N, "videoSearchSorting": ordenar_busca_por,
@@ -140,7 +145,8 @@ mais 0,0013 se tiver país, mais 0,001 por run. Mostre antes de rodar.
 de idioma (`idiomas`/`paises`) fica desligado por padrão, porque o país da
 busca já resolve isso; listas vazias significam desligado. Vídeo achado por mais de uma palavra conta uma vez, na
 primeira, e as outras palavras vão na coluna `tambem_achado_por`. Reprove por
-anúncio, slideshow, views, likes e duração conforme o config. Ordene por
+idade (`createTimeISO` mais velha que `idade_maxima_meses`), anúncio,
+slideshow, views, likes e duração conforme o config. Ordene por
 views, guarde os `top_por_palavra` de cada palavra com um `rank`. Salve
 `resultados/aprovados.json` (só os do top) e duas planilhas:
 `resultados/planilha_melhores.csv` com colunas palavra, rank, views, likes,

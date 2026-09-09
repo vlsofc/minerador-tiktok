@@ -1,7 +1,9 @@
 {
+  "modo": "busca",
   "resultados_por_palavra": 50,
-  "periodo": "LAST_6_MONTHS",
-  "ordenar_busca_por": "MOST_LIKED",
+  "periodo": "ALL_TIME",
+  "ordenar_busca_por": "MOST_RELEVANT",
+  "idade_maxima_meses": 6,
   "pais": "BR",
   "idiomas": [],
   "paises": [],

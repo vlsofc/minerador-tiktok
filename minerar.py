@@ -16,12 +16,13 @@ Opções:
 
 Arquivos que você edita:
   palavras.txt   uma palavra-chave por linha
-  config.json    filtros (views mínimas, período, quantos por palavra...)
+  config.json    filtros (views mínimas, idade máxima, quantos por palavra, modo busca ou hashtag...)
   .env           APIFY_TOKEN=seu_token
 
 Não precisa instalar nenhuma biblioteca Python. Só precisa do yt-dlp para baixar.
 """
 import csv
+import datetime
 import json
 import os
 import re
@@ -59,9 +60,11 @@ PAUSA_ENTRE_TENTATIVAS_S = 3
 PAUSA_ENTRE_VIDEOS_S = 2
 
 CONFIG_PADRAO = {
+    "modo": "busca",
     "resultados_por_palavra": 50,
-    "periodo": "LAST_6_MONTHS",
-    "ordenar_busca_por": "MOST_LIKED",
+    "periodo": "ALL_TIME",
+    "ordenar_busca_por": "MOST_RELEVANT",
+    "idade_maxima_meses": 6,
     "pais": "BR",
     "idiomas": [],
     "paises": [],
@@ -104,6 +107,8 @@ def carregar_config():
             falhar("config.json inválido: %s" % e)
     if config["pais"] and config["pais"] not in PAISES_ACEITOS:
         falhar("país '%s' não é aceito. Use o código de 2 letras: BR, US, PT, MX, ES, AR, GB..." % config["pais"])
+    if config.get("modo") not in ("busca", "hashtag"):
+        falhar("modo inválido no config.json. Use \"busca\" (termo de pesquisa) ou \"hashtag\".")
     if config["periodo"] not in PERIODOS:
         falhar("periodo inválido no config.json. Use um destes: %s" % ", ".join(PERIODOS))
     if config["ordenar_busca_por"] not in ORDENACOES:
@@ -171,9 +176,9 @@ def limpar_nome(s):
 
 def estimar_custo(config, n_palavras):
     por_resultado = PRECO_RESULTADO
-    if config["periodo"] != "ALL_TIME":
+    if config["modo"] == "busca" and config["periodo"] != "ALL_TIME":
         por_resultado += PRECO_FILTRO
-    if config["ordenar_busca_por"] != "MOST_RELEVANT":
+    if config["modo"] == "busca" and config["ordenar_busca_por"] != "MOST_RELEVANT":
         por_resultado += PRECO_FILTRO
     if config["pais"]:
         por_resultado += PRECO_FILTRO
@@ -188,8 +193,13 @@ def estimar(config):
     custo = estimar_custo(config, len(palavras))
     print("Palavras-chave (%d): %s" % (len(palavras), ", ".join(palavras)))
     print("Busca feita a partir de: %s" % (config["pais"] or "sem país definido (resultados vêm misturados)"))
-    print("Resultados por palavra: %d | período: %s | ordenação: %s" % (
-        config["resultados_por_palavra"], config["periodo"], config["ordenar_busca_por"]))
+    if config["modo"] == "hashtag":
+        print("Modo: página da hashtag | %d vídeos por hashtag" % config["resultados_por_palavra"])
+    else:
+        print("Modo: busca por termo | %d por palavra | ordenação %s | filtro de data na busca: %s" % (
+            config["resultados_por_palavra"], config["ordenar_busca_por"], config["periodo"]))
+    if config["idade_maxima_meses"]:
+        print("Depois da busca, vídeos com mais de %d meses vão para a planilha do restante." % config["idade_maxima_meses"])
     print("Custo estimado na Apify (plano gratuito): %s" % dolar(custo))
     token = carregar_token()
     conta = api("GET", "/users/me", token)["data"]
@@ -210,14 +220,21 @@ def buscar(config, confirmado=False):
     # Um run por palavra, assim cada vídeo já sai etiquetado com a palavra que o achou.
     runs = {}
     for palavra in palavras:
-        entrada = {
-            "searchQueries": [palavra],
-            "searchSection": "/video",
-            "resultsPerPage": config["resultados_por_palavra"],
-            "videoSearchSorting": config["ordenar_busca_por"],
-            "videoSearchDateFilter": config["periodo"],
-            "shouldDownloadVideos": False,
-        }
+        if config["modo"] == "hashtag":
+            entrada = {
+                "hashtags": [palavra.lstrip("#").replace(" ", "")],
+                "resultsPerPage": config["resultados_por_palavra"],
+                "shouldDownloadVideos": False,
+            }
+        else:
+            entrada = {
+                "searchQueries": [palavra],
+                "searchSection": "/video",
+                "resultsPerPage": config["resultados_por_palavra"],
+                "videoSearchSorting": config["ordenar_busca_por"],
+                "videoSearchDateFilter": config["periodo"],
+                "shouldDownloadVideos": False,
+            }
         if config["pais"]:
             entrada["proxyCountryCode"] = config["pais"]
         resp = api("POST", "/acts/%s/runs" % ACTOR, token, entrada)
@@ -310,8 +327,17 @@ def filtrar(config):
         vistos[v["id"]] = v
 
     idiomas, paises = config.get("idiomas") or [], config.get("paises") or []
+    hoje = datetime.date.today()
+
+    def idade_meses(v):
+        try:
+            return (hoje - datetime.date.fromisoformat(v["data"])).days // 30
+        except ValueError:
+            return 0
 
     def motivo_reprovacao(v):
+        if config["idade_maxima_meses"] and idade_meses(v) > config["idade_maxima_meses"]:
+            return "mais velho que %d meses" % config["idade_maxima_meses"]
         # Passa se o texto está num idioma aceito OU o vídeo foi criado num país aceito.
         if (idiomas or paises) and not (v["idioma"] in idiomas or v["pais"] in paises):
             return "idioma %s / país %s" % (v["idioma"] or "?", v["pais"] or "?")
