@@ -11,6 +11,7 @@ Uso:
   python3 minerar.py tudo      os três passos em sequência
 
 Opções:
+  --pais XX                    país de onde a busca é feita (BR, US, PT, MX...). Fica salvo no config.json
   --confirmado                 o usuário já confirmou o custo, não pergunta de novo
 
 Arquivos que você edita:
@@ -61,9 +62,9 @@ CONFIG_PADRAO = {
     "resultados_por_palavra": 50,
     "periodo": "LAST_6_MONTHS",
     "ordenar_busca_por": "MOST_LIKED",
-    "pais": "",
-    "idiomas": ["pt"],
-    "paises": ["BR"],
+    "pais": "BR",
+    "idiomas": [],
+    "paises": [],
     "views_minimas": 100000,
     "likes_minimos": 0,
     "duracao_minima_s": 5,
@@ -72,6 +73,12 @@ CONFIG_PADRAO = {
     "ignorar_slideshows": True,
     "top_por_palavra": 20,
 }
+
+PAISES_ACEITOS = set("""AF AL DZ AS AD AO AI AG AR AM AU AT AZ BS BH BB BY BE BZ BJ BM BT BO BA BW BR VG BN BG BF BI KH CM CA
+CV KY TD CL CO CK CR HR CY CZ CD DK DJ DO EC EG SV EE ET FK FJ FI FR PF GA GE DE GH GI GR GL GD GP GT GN GW GY HN HU IS ID
+IQ IE IM IL IT CI JM JP JE KZ KE XK KW LA LV LB LS LR LY LT LU MO MG MW MY MV ML MT MH MQ MR MU MX MD MC MN ME MA MZ MM NA
+NR NP NL NZ NI NG MK NO OM PS PA PG PY PE PH PL PT PR QA CG RO RU RW RE KN LC MF PM VC SM SA SN RS SL SG SX SK SB SO ZA KR
+ES LK SR SZ SE CH TW TJ TZ TH TG TO TT TN TR TC TV VI UG UA AE GB US UY VE VN WF YE ZM ZW AX""".split())
 
 PERIODOS = ["ALL_TIME", "PAST_24_HOURS", "PAST_WEEK", "PAST_MONTH", "LAST_3_MONTHS", "LAST_6_MONTHS"]
 ORDENACOES = ["MOST_RELEVANT", "MOST_LIKED", "LATEST"]
@@ -95,6 +102,8 @@ def carregar_config():
             config.update(json.load(f))
         except json.JSONDecodeError as e:
             falhar("config.json inválido: %s" % e)
+    if config["pais"] and config["pais"] not in PAISES_ACEITOS:
+        falhar("país '%s' não é aceito. Use o código de 2 letras: BR, US, PT, MX, ES, AR, GB..." % config["pais"])
     if config["periodo"] not in PERIODOS:
         falhar("periodo inválido no config.json. Use um destes: %s" % ", ".join(PERIODOS))
     if config["ordenar_busca_por"] not in ORDENACOES:
@@ -178,8 +187,9 @@ def estimar(config):
     palavras = carregar_palavras()
     custo = estimar_custo(config, len(palavras))
     print("Palavras-chave (%d): %s" % (len(palavras), ", ".join(palavras)))
-    print("Resultados por palavra: %d | período: %s | ordenação: %s | país: %s" % (
-        config["resultados_por_palavra"], config["periodo"], config["ordenar_busca_por"], config["pais"] or "-"))
+    print("Busca feita a partir de: %s" % (config["pais"] or "sem país definido (resultados vêm misturados)"))
+    print("Resultados por palavra: %d | período: %s | ordenação: %s" % (
+        config["resultados_por_palavra"], config["periodo"], config["ordenar_busca_por"]))
     print("Custo estimado na Apify (plano gratuito): %s" % dolar(custo))
     token = carregar_token()
     conta = api("GET", "/users/me", token)["data"]
@@ -436,6 +446,17 @@ def main():
     comando = args[0] if args else ""
     print("Minerador de vídeos do TikTok | " + ASSINATURA + "\n")
     config = carregar_config()
+    if "--pais" in sys.argv:
+        pos = sys.argv.index("--pais")
+        pais = sys.argv[pos + 1].strip().upper() if len(sys.argv) > pos + 1 else ""
+        if pais not in PAISES_ACEITOS:
+            falhar("--pais precisa do código de 2 letras: BR, US, PT, MX, ES, AR, GB...")
+        config["pais"] = pais
+        salvo = json.load(open(ARQ_CONFIG, encoding="utf-8"))
+        salvo["pais"] = pais
+        with open(ARQ_CONFIG, "w", encoding="utf-8") as f:
+            json.dump(salvo, f, ensure_ascii=False, indent=2)
+        print("País da busca salvo no config.json: %s\n" % pais)
     if comando == "estimar":
         estimar(config)
     elif comando == "buscar":

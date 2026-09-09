@@ -34,19 +34,23 @@ python3 minerar.py baixar     # grátis, vídeos em videos/<palavra>/
 - Vídeo achado por mais de uma palavra aparece uma vez, com as outras
   palavras na coluna `tambem_achado_por`.
 
-## Filtro de idioma e país
+## País e idioma
 
-Sem proxy, a busca do TikTok devolve muito conteúdo em espanhol e inglês
-para termos como "perder peso". O filtro local aceita o vídeo se o texto está
-num dos `idiomas` ou se foi criado num dos `paises` do `config.json`. Padrão:
-português ou Brasil. Listas vazias desligam o filtro.
+O que define de onde vêm os vídeos é o país da busca (`pais` no
+`config.json`, ou `--pais XX` em qualquer comando). A busca é feita como se
+estivesse naquele país. Sem isso, termos como "perder peso" trazem uma mistura
+de espanhol e inglês. Os termos devem estar no idioma do país escolhido; no
+prompt do aluno, o agente traduz e pede aprovação.
+
+O filtro local por `idiomas`/`paises` existe, mas fica desligado por padrão.
+Só faz sentido para tirar um ou outro vídeo estrangeiro que ainda apareça.
 
 ## Custo
 
 Actor `clockworks/tiktok-scraper`, plano gratuito da Apify em 09/2026:
 0,0037 dólar por resultado, mais 0,0013 por filtro de data, mais 0,0013 por
 ordenação, mais 0,0013 por país. Com o config padrão, 4 palavras com 50
-resultados cada dá cerca de 1,30 dólar. O plano gratuito da Apify vem com
+resultados cada, busca feita do Brasil, dá cerca de 1,52 dólar. O plano gratuito da Apify vem com
 5 dólares por mês, então dá pra testar sem pagar.
 
 ## O que já foi validado

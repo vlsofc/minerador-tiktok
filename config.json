@@ -2,13 +2,9 @@
   "resultados_por_palavra": 50,
   "periodo": "LAST_6_MONTHS",
   "ordenar_busca_por": "MOST_LIKED",
-  "pais": "",
-  "idiomas": [
-    "pt"
-  ],
-  "paises": [
-    "BR"
-  ],
+  "pais": "BR",
+  "idiomas": [],
+  "paises": [],
   "views_minimas": 100000,
   "likes_minimos": 0,
   "duracao_minima_s": 5,

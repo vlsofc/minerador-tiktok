@@ -35,14 +35,26 @@ passar, já filtrados por views, e duas planilhas: uma com os melhores de cada
 palavra e outra com todo o resto do que a busca trouxe. Nada do que a busca
 trouxe pode ser descartado, eu paguei por essas informações.
 
-## Passo 1: me pergunte duas coisas (pode ser na mesma mensagem)
+## Passo 1: me pergunte três coisas (pode ser na mesma mensagem)
 
 1. Meu token da Apify. Eu pego em https://console.apify.com/settings/integrations,
    no campo "Personal API token", e colo aqui. Salve num arquivo `.env` nesta
    pasta, na linha `APIFY_TOKEN=...`. Depois de salvo, não mostre o token de
    novo. Me avise que o `.env` é um arquivo oculto, então é normal eu não ver
    ele na pasta (no Mac, Cmd+Shift+. mostra os ocultos).
-2. Minhas palavras-chave, uma por linha. Salve em `palavras.txt`.
+2. Minhas palavras-chave, uma por linha.
+3. De que país e em que idioma eu quero os vídeos. Exemplos: Brasil em
+   português, Estados Unidos em inglês, México em espanhol, Portugal em
+   português. A busca é feita como se estivesse naquele país, então isso
+   define o que vem. Códigos: Brasil BR, Estados Unidos US, Portugal PT,
+   México MX, Espanha ES, Argentina AR, Reino Unido GB.
+
+Depois das respostas: se minhas palavras estiverem num idioma diferente do
+escolhido, traduza cada uma pro idioma escolhido, do jeito que as pessoas
+daquele país pesquisariam no TikTok, e me mostre a tradução pra eu aprovar
+antes de seguir. Salve as palavras finais em `palavras.txt`, uma por linha, e
+as originais logo acima delas como comentário, por exemplo
+`# original: perder peso`.
 
 ## Passo 2: prepare a pasta
 
@@ -58,8 +70,9 @@ trouxe pode ser descartado, eu paguei por essas informações.
 
 ## Passo 3: rode em quatro etapas
 
-1. Rode `python3 minerar.py estimar`. Ele mostra o custo em dólar e confere
-   se o token está válido, sem gastar nada. Se o token estiver inválido, me
+1. Rode `python3 minerar.py estimar --pais XX`, com o código do país que eu
+   escolhi. Isso salva o país no `config.json`, mostra o custo em dólar e
+   confere se o token está válido, sem gastar nada. Se o token estiver inválido, me
    peça de novo, troque você mesmo no `.env` e rode `estimar` outra vez. Me
    mostre o custo e termine a mensagem perguntando se pode continuar.
 2. Espere uma mensagem minha dizendo sim. Nunca rode a busca na mesma
@@ -74,6 +87,7 @@ trouxe pode ser descartado, eu paguei por essas informações.
 
 ## Passo 4: me entregue
 
+- O país e o idioma usados, e as palavras finais da busca.
 - A tabela final por palavra.
 - Onde estão as duas planilhas: `resultados/planilha_melhores.csv` (os
   melhores de cada palavra, que foram baixados) e
@@ -88,7 +102,8 @@ trouxe pode ser descartado, eu paguei por essas informações.
 Python 3, sem bibliotecas externas, um arquivo `minerar.py` com quatro
 subcomandos: `estimar` (imprime o custo e valida o token com
 `GET /v2/users/me`, sem gastar), `buscar`, `filtrar`, `baixar`, e `tudo`, que
-roda os três últimos em sequência. Se `config.json` não
+roda os três últimos em sequência. A opção `--pais XX` grava o código do país
+no `config.json` e vale para qualquer subcomando. Se `config.json` não
 existir, cria com os padrões. Aceita `--confirmado` para pular a pergunta de
 custo; sem ele e sem terminal interativo, `buscar` para com uma mensagem em
 vez de travar. Toda execução imprime no início e no fim a linha "Feito por
@@ -98,8 +113,8 @@ dólar com vírgula decimal. Lê `palavras.txt` (uma por linha, ignora linhas co
 
 `config.json` padrão:
 `{"resultados_por_palavra": 50, "periodo": "LAST_6_MONTHS",
-"ordenar_busca_por": "MOST_LIKED", "pais": "", "idiomas": ["pt"],
-"paises": ["BR"], "views_minimas": 100000,
+"ordenar_busca_por": "MOST_LIKED", "pais": "BR", "idiomas": [],
+"paises": [], "views_minimas": 100000,
 "likes_minimos": 0, "duracao_minima_s": 5, "duracao_maxima_s": 90,
 "ignorar_anuncios": true, "ignorar_slideshows": true, "top_por_palavra": 20}`
 
@@ -107,8 +122,9 @@ dólar com vírgula decimal. Lê `palavras.txt` (uma por linha, ignora linhas co
 `POST https://api.apify.com/v2/acts/clockworks~tiktok-scraper/runs?token=TOKEN`
 com JSON `{"searchQueries": [palavra], "searchSection": "/video",
 "resultsPerPage": N, "videoSearchSorting": ordenar_busca_por,
-"videoSearchDateFilter": periodo, "shouldDownloadVideos": false}` e
-`"proxyCountryCode"` só se `pais` não for vazio. A resposta traz `data.id` e
+"videoSearchDateFilter": periodo, "shouldDownloadVideos": false,
+"proxyCountryCode": pais}`. O `proxyCountryCode` é o que faz a busca sair do
+país escolhido; sem ele os resultados vêm misturados de vários países. A resposta traz `data.id` e
 `data.defaultDatasetId`. Consulte `GET /v2/actor-runs/{id}?token=` a cada 8s
 até `data.status` ser SUCCEEDED, FAILED, TIMED-OUT ou ABORTED. Depois leia
 `GET /v2/datasets/{datasetId}/items?token=&clean=true&format=json`, marque
@@ -120,9 +136,9 @@ mais 0,0013 se tiver país, mais 0,001 por run. Mostre antes de rodar.
 **filtrar**: campos de cada item: `id`, `text`, `createTimeISO`,
 `webVideoUrl`, `playCount`, `diggCount`, `commentCount`, `shareCount`,
 `collectCount`, `isAd`, `isSlideshow`, `textLanguage`, `locationCreated`,
-`authorMeta.name`, `authorMeta.fans`, `videoMeta.duration`. Vídeo passa no
-filtro de idioma se `textLanguage` está em `idiomas` ou `locationCreated`
-está em `paises`; listas vazias desligam esse filtro. Vídeo achado por mais de uma palavra conta uma vez, na
+`authorMeta.name`, `authorMeta.fans`, `videoMeta.duration`. O filtro local
+de idioma (`idiomas`/`paises`) fica desligado por padrão, porque o país da
+busca já resolve isso; listas vazias significam desligado. Vídeo achado por mais de uma palavra conta uma vez, na
 primeira, e as outras palavras vão na coluna `tambem_achado_por`. Reprove por
 anúncio, slideshow, views, likes e duração conforme o config. Ordene por
 views, guarde os `top_por_palavra` de cada palavra com um `rank`. Salve
