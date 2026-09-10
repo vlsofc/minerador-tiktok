@@ -1,7 +1,4 @@
 {
   "pais": "BR",
-  "resultados_por_palavra": 50,
-  "top_por_palavra": 20,
-  "idade_maxima_meses": 0,
-  "duracao_maxima_s": 0
+  "resultados_por_palavra": 50
 }

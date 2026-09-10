@@ -2,7 +2,8 @@
 
 O script fica público em https://github.com/vlsofc/minerador-tiktok. Se a URL
 sair do ar, o agente escreve o script sozinho pela especificação do final, que
-funciona, mas é menos previsível.
+funciona, mas é menos previsível. A versão limpa, só com o texto que o aluno
+cola, está em `prompt-para-enviar.txt`.
 
 Onde o aluno cola: **Claude Code, Codex ou Gemini CLI**, aberto numa pasta
 vazia. Não funciona no chat comum do Claude, ChatGPT ou Gemini, porque o chat
@@ -20,9 +21,9 @@ português simples, sem jargão, sem citar nomes de arquivos ou pastas internas.
 ## O que eu quero no final
 
 O mesmo que eu faria na mão: pesquisar cada termo na busca do TikTok e baixar
-os vídeos que aparecem. No final quero uma pasta aberta na minha tela com
-todos os vídeos, separados em "melhores" (os 20 mais vistos de cada termo) e
-"restante" (todo o resto), mais duas planilhas com os números de cada vídeo.
+os vídeos que aparecem. No final quero uma pasta aberta na minha tela com uma
+pasta por termo, contendo todos os vídeos que a busca trouxe, numerados do
+mais visto ao menos visto, mais uma planilha com os números de cada vídeo.
 Nada do que a busca trouxe pode ser descartado, eu paguei por essas
 informações. Não julgue se um vídeo tem a ver com o meu tema ou não: você
 não sabe o que eu vou fazer com ele. Baixe tudo.
@@ -79,7 +80,7 @@ originais logo acima deles como comentário, por exemplo
 3. Depois do meu sim, rode em sequência, sem me perguntar mais nada e sem
    me mostrar tabelas no meio do caminho:
    `python3 minerar.py buscar --confirmado`, depois
-   `python3 minerar.py filtrar`, depois `python3 minerar.py baixar`.
+   `python3 minerar.py organizar`, depois `python3 minerar.py baixar`.
    Antes do `baixar`, me avise em uma linha que o download de todos os vídeos
    leva alguns minutos, e continue.
 
@@ -90,9 +91,8 @@ Abra a pasta `mineracao` pra mim na tela: `open mineracao` no Mac,
 mensagem curta com:
 
 - Que a pasta está aberta, e o caminho completo dela.
-- Que dentro tem uma pasta por termo, cada uma com "melhores" (os 20 mais
-  vistos) e "restante" (todo o resto), e duas planilhas com os números de
-  cada vídeo.
+- Que dentro tem uma pasta por termo com todos os vídeos, numerados do mais
+  visto ao menos visto, e uma planilha com os números de cada vídeo.
 - Uma tabela simples: termo, vídeos encontrados, baixados.
 - Se algum vídeo falhou no download, quantos, em uma linha.
 
@@ -102,7 +102,7 @@ internas nem arquivos técnicos.
 ## Especificação do script (só use se não conseguiu baixar)
 
 Python 3, sem bibliotecas externas, um arquivo `minerar.py` com os
-subcomandos `estimar`, `buscar`, `filtrar`, `baixar` e `tudo` (os três
+subcomandos `estimar`, `buscar`, `organizar`, `baixar` e `tudo` (os três
 últimos em sequência). A opção `--pais XX` grava o código do país no
 `config.json` e vale para qualquer subcomando. `--confirmado` pula a pergunta
 de custo; sem ele e sem terminal interativo, `buscar` para com uma mensagem
@@ -113,9 +113,7 @@ por @matheusvalois. Siga no Instagram para mais ferramentas assim." Custos em
 dólar com vírgula decimal. Dados brutos ficam em `resultados/`; a entrega
 fica em `mineracao/`.
 
-`config.json` padrão:
-`{"pais": "BR", "resultados_por_palavra": 50, "top_por_palavra": 20,
-"idade_maxima_meses": 0, "duracao_maxima_s": 0}`
+`config.json` padrão: `{"pais": "BR", "resultados_por_palavra": 50}`
 
 **estimar**: custo = termos × (resultados_por_palavra × (0,0037 + 0,0013 se
 tiver país) + 0,001). Imprime o custo e valida o token com
@@ -134,31 +132,23 @@ até `data.status` ser SUCCEEDED, FAILED, TIMED-OUT ou ABORTED. Depois leia
 `GET /v2/datasets/{datasetId}/items?token=&clean=true&format=json`, marque
 cada item com `"palavra"` e salve tudo em `resultados/bruto.json`.
 
-**filtrar**: campos de cada item: `id`, `text`, `createTimeISO`,
+**organizar**: campos de cada item: `id`, `text`, `createTimeISO`,
 `webVideoUrl`, `playCount`, `diggCount`, `commentCount`, `shareCount`,
 `collectCount`, `isAd`, `isSlideshow`, `textLanguage`, `authorMeta.name`,
-`authorMeta.fans`, `videoMeta.duration`. Cada termo tem o seu próprio
-ranking, como buscas separadas: vídeo achado por mais de um termo aparece em
-cada um deles, e a coluna `tambem_achado_por` lista os outros termos. Anúncio
-e slideshow não entram nos melhores, mas ficam no restante, assim como
-duração acima de `duracao_maxima_s` e idade acima de `idade_maxima_meses`
-quando configurados. O resto é ordenado por `playCount`; os `top_por_palavra`
-de cada termo são os melhores, todos os outros são o restante. Cada vídeo
-recebe `posicao` única dentro do termo (1..N, melhores primeiro, depois o
-restante por views). Salve `resultados/melhores.json`,
-`resultados/restante.json`, `mineracao/planilha_melhores.csv` (colunas
-palavra, posicao, views, likes, comentarios, shares, salvos,
-engajamento_pct, duracao_s, data, idioma, autor, seguidores, texto, url,
-tambem_achado_por) e `mineracao/planilha_restante.csv` (mesmas colunas, mais
-`motivo`: "fora do top 20 por views", "anúncio", "carrossel de fotos, não é
-vídeo"...). Nenhum vídeo do bruto fica fora das duas planilhas. Imprime a
-tabela termo, brutos, melhores, restante.
+`authorMeta.fans`, `videoMeta.duration`. Cada termo é uma busca separada:
+vídeo achado por mais de um termo aparece em cada um deles, e a coluna
+`tambem_achado_por` lista os outros termos. Dentro de cada termo, ordene por
+`playCount` e dê `posicao` 1..N. Nada é filtrado. Salve
+`resultados/videos.json` e `mineracao/planilha.csv` com colunas palavra,
+posicao, views, likes, comentarios, shares, salvos, engajamento_pct,
+duracao_s, data, idioma, autor, seguidores, texto, url, tambem_achado_por,
+observacao ("anúncio", "carrossel de fotos, não é vídeo", ou vazio). Imprime
+a tabela termo, vídeos.
 
-**baixar**: baixa TODOS os vídeos, primeiro os melhores, depois o restante,
-pulando só slideshows (não são vídeo). Destino
-`mineracao/<termo>/melhores/<posicao 2 dígitos>_<views humano>-views_<autor>_<id>.mp4`
-ou `mineracao/<termo>/restante/...`. Comando
-`yt-dlp --no-warnings --quiet --no-progress --no-playlist -o DESTINO URL`.
+**baixar**: baixa TODOS os vídeos, pulando só carrossel de fotos (não é
+vídeo). Destino
+`mineracao/<termo>/<posicao 2 dígitos>_<views humano>-views_<autor>_<id>.mp4`.
+Comando `yt-dlp --no-warnings --quiet --no-progress --no-playlist -o DESTINO URL`.
 O TikTok às vezes devolve uma página de desafio em vez do vídeo, então tente
 até 3 vezes com 3s de pausa, e espere 1s entre vídeos. Pule arquivo que já
 existe. Vídeo que aparece em mais de um termo baixa uma vez e vai para as
