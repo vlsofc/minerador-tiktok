@@ -155,6 +155,10 @@ def api(metodo, caminho, token, corpo=None):
         if e.code == 401:
             falhar("token da Apify inválido ou expirado. Confira em https://console.apify.com/settings/integrations "
                    "e corrija a linha APIFY_TOKEN= no arquivo .env")
+        if e.code == 402:
+            falhar("crédito da Apify insuficiente. Cada busca precisa de pelo menos 0,50 dólar de folga na conta, "
+                   "mesmo custando menos. Veja o saldo e adicione crédito em https://console.apify.com/billing\n"
+                   "Resposta da Apify: %s" % e.read().decode()[:200])
         falhar("Apify respondeu %s em %s: %s" % (e.code, caminho, e.read().decode()[:300]))
     except urllib.error.URLError as e:
         falhar("não consegui falar com a Apify (%s). Confira sua internet." % e.reason)
