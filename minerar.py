@@ -4,13 +4,13 @@ Minerador de vídeos do TikTok.
 Criado por Matheus Valois. Instagram: @matheusvalois. Siga para mais ferramentas assim.
 
 Faz o que você faria na mão: pesquisa cada termo no TikTok, pega os vídeos que
-aparecem, ordena por views, separa os melhores de cada termo e baixa.
+aparecem, ordena por views e baixa todos, separando os melhores do restante.
 
 Uso:
   python3 minerar.py estimar   mostra quanto a busca vai custar e confere o token, sem gastar nada
   python3 minerar.py buscar    busca no TikTok via Apify (gasta crédito da Apify)
   python3 minerar.py filtrar   ordena por views e gera as duas planilhas (grátis, pode repetir)
-  python3 minerar.py baixar    baixa os melhores com yt-dlp (grátis)
+  python3 minerar.py baixar    baixa todos os vídeos com yt-dlp, melhores e restante (grátis)
   python3 minerar.py tudo      os três últimos em sequência
 
 Opções:
@@ -18,10 +18,12 @@ Opções:
   --confirmado                 o usuário já confirmou o custo, não pergunta de novo
 
 Arquivos que você edita:
-  palavras.txt          um termo de pesquisa por linha, do jeito que você digitaria no TikTok
-  config.json           quantos vídeos buscar por termo, quantos guardar como melhores, país
-  .env                  APIFY_TOKEN=seu_token
-  resultados/pular.txt  (opcional) URLs que você não quer baixar, uma por linha
+  palavras.txt   um termo de pesquisa por linha, do jeito que você digitaria no TikTok
+  config.json    quantos vídeos buscar por termo, quantos guardar como melhores, país
+  .env           APIFY_TOKEN=seu_token
+
+O que sai: a pasta mineracao/, com uma pasta por termo (melhores/ e restante/)
+e as duas planilhas. A pasta resultados/ guarda os dados brutos.
 
 Não precisa instalar nenhuma biblioteca Python. Só precisa do yt-dlp para baixar.
 """
@@ -42,12 +44,12 @@ ARQ_PALAVRAS = os.path.join(PASTA, "palavras.txt")
 ARQ_CONFIG = os.path.join(PASTA, "config.json")
 ARQ_ENV = os.path.join(PASTA, ".env")
 PASTA_RESULTADOS = os.path.join(PASTA, "resultados")
-PASTA_VIDEOS = os.path.join(PASTA, "videos")
+PASTA_SAIDA = os.path.join(PASTA, "mineracao")
 ARQ_BRUTO = os.path.join(PASTA_RESULTADOS, "bruto.json")
 ARQ_MELHORES_JSON = os.path.join(PASTA_RESULTADOS, "melhores.json")
-ARQ_MELHORES = os.path.join(PASTA_RESULTADOS, "planilha_melhores.csv")
-ARQ_RESTANTE = os.path.join(PASTA_RESULTADOS, "planilha_restante.csv")
-ARQ_PULAR = os.path.join(PASTA_RESULTADOS, "pular.txt")
+ARQ_RESTANTE_JSON = os.path.join(PASTA_RESULTADOS, "restante.json")
+ARQ_MELHORES = os.path.join(PASTA_SAIDA, "planilha_melhores.csv")
+ARQ_RESTANTE = os.path.join(PASTA_SAIDA, "planilha_restante.csv")
 
 ASSINATURA = "Feito por @matheusvalois. Siga no Instagram para mais ferramentas assim."
 
@@ -61,7 +63,7 @@ PRECO_INICIO_RUN = 0.001
 
 TENTATIVAS_DOWNLOAD = 3
 PAUSA_ENTRE_TENTATIVAS_S = 3
-PAUSA_ENTRE_VIDEOS_S = 2
+PAUSA_ENTRE_VIDEOS_S = 1
 
 # A busca vai por relevância e sem filtro de data de propósito. Testado em 09/2026:
 # o filtro de data do TikTok devolve um poço raso de vídeos fracos, e a ordenação
@@ -75,8 +77,6 @@ CONFIG_PADRAO = {
     "top_por_palavra": 20,
     "idade_maxima_meses": 0,
     "duracao_maxima_s": 0,
-    "ignorar_anuncios": True,
-    "ignorar_slideshows": True,
 }
 
 PAISES_ACEITOS = set("""AF AL DZ AS AD AO AI AG AR AM AU AT AZ BS BH BB BY BE BZ BJ BM BT BO BA BW BR VG BN BG BF BI KH CM CA
@@ -194,7 +194,7 @@ def estimar(config):
     custo = estimar_custo(config, len(palavras))
     print("Termos (%d): %s" % (len(palavras), ", ".join(palavras)))
     print("Busca feita a partir de: %s" % (config["pais"] or "sem país definido (resultados vêm misturados)"))
-    print("Vídeos por termo: %d | melhores guardados por termo: %d" % (config["resultados_por_palavra"], config["top_por_palavra"]))
+    print("Vídeos por termo: %d | melhores por termo: %d" % (config["resultados_por_palavra"], config["top_por_palavra"]))
     print("Custo estimado na Apify (plano gratuito): %s" % dolar(custo))
     token = carregar_token()
     conta = api("GET", "/users/me", token)["data"]
@@ -311,9 +311,10 @@ def filtrar(config):
     # tambem_achado_por diz quais outros termos o acharam. O download baixa uma vez.
     achado_por = {}
     for item in brutos:
-        achado_por.setdefault(str(item.get("id") or ""), [])
-        if item.get("palavra") not in achado_por[str(item.get("id") or "")]:
-            achado_por[str(item.get("id") or "")].append(item.get("palavra"))
+        vid = str(item.get("id") or "")
+        achado_por.setdefault(vid, [])
+        if item.get("palavra") not in achado_por[vid]:
+            achado_por[vid].append(item.get("palavra"))
 
     hoje = datetime.date.today()
 
@@ -323,13 +324,13 @@ def filtrar(config):
         except ValueError:
             return 0
 
-    # Só o que não é vídeo de gente (anúncio, carrossel de fotos) ou o que o
-    # usuário pediu explicitamente para limitar. O resto é decidido por views.
+    # Anúncio e carrossel de fotos não entram no ranking dos melhores, mas ficam
+    # no restante. O resto é decidido por views.
     def motivo_exclusao(v):
-        if config["ignorar_anuncios"] and v["anuncio"]:
+        if v["anuncio"]:
             return "anúncio"
-        if config["ignorar_slideshows"] and v["slideshow"]:
-            return "slideshow (fotos, não vídeo)"
+        if v["slideshow"]:
+            return "carrossel de fotos, não é vídeo"
         if config["duracao_maxima_s"] and v["duracao_s"] > config["duracao_maxima_s"]:
             return "mais longo que %ds" % config["duracao_maxima_s"]
         if config["idade_maxima_meses"] and idade_meses(v) > config["idade_maxima_meses"]:
@@ -348,56 +349,51 @@ def filtrar(config):
     top_n = config["top_por_palavra"]
     print("%-30s %7s %9s %10s" % ("termo", "brutos", "melhores", "restante"))
     for palavra, videos in por_palavra.items():
-        candidatos = []
+        candidatos, fora = [], []
         for v in videos:
             motivo = motivo_exclusao(v)
             if motivo:
                 v["motivo"] = motivo
                 excluidos[motivo] = excluidos.get(motivo, 0) + 1
-                restante.append(v)
+                fora.append(v)
             else:
                 candidatos.append(v)
         candidatos.sort(key=lambda x: x["views"], reverse=True)
+        fora.sort(key=lambda x: x["views"], reverse=True)
         top = candidatos[:top_n]
-        for i, v in enumerate(top, 1):
-            v["rank"] = i
-        melhores.extend(top)
         for v in candidatos[top_n:]:
             v["motivo"] = "fora do top %d por views" % top_n
-            restante.append(v)
+        # posição única por termo: 1..N, melhores primeiro, depois o restante por views
+        for i, v in enumerate(top + candidatos[top_n:] + fora, 1):
+            v["posicao"] = i
+        melhores.extend(top)
+        restante.extend(candidatos[top_n:] + fora)
         print("%-30s %7d %9d %10d" % (palavra, len(videos), len(top), len(videos) - len(top)))
 
     if excluidos:
-        print("Excluídos antes do ranking: " + ", ".join("%s (%d)" % (m, n) for m, n in excluidos.items()))
+        print("Fora do ranking dos melhores, mas no restante: " + ", ".join("%s (%d)" % (m, n) for m, n in excluidos.items()))
     repetidos = sum(1 for lista in achado_por.values() if len(lista) > 1)
     if repetidos:
         print("Vídeos achados por mais de um termo: %d (aparecem em cada termo, baixados uma vez)" % repetidos)
-    unicos = len({v["id"] for v in melhores})
 
-    restante.sort(key=lambda x: (x["palavra"], -x["views"]))
     os.makedirs(PASTA_RESULTADOS, exist_ok=True)
+    os.makedirs(PASTA_SAIDA, exist_ok=True)
     with open(ARQ_MELHORES_JSON, "w", encoding="utf-8") as f:
         json.dump(melhores, f, ensure_ascii=False, indent=1)
+    with open(ARQ_RESTANTE_JSON, "w", encoding="utf-8") as f:
+        json.dump(restante, f, ensure_ascii=False, indent=1)
     metricas = ["views", "likes", "comentarios", "shares", "salvos", "engajamento_pct",
                 "duracao_s", "data", "idioma", "autor", "seguidores", "texto", "url", "tambem_achado_por"]
-    escrever_csv(ARQ_MELHORES, ["palavra", "rank"] + metricas, melhores)
-    escrever_csv(ARQ_RESTANTE, ["palavra", "motivo"] + metricas, restante)
-    print("Melhores: %d linhas, %d vídeos diferentes, em %s" % (len(melhores), unicos, os.path.relpath(ARQ_MELHORES, PASTA)))
-    print("Restante: %d linhas em %s (nada é descartado, você pagou por eles)" % (len(restante), os.path.relpath(ARQ_RESTANTE, PASTA)))
+    escrever_csv(ARQ_MELHORES, ["palavra", "posicao"] + metricas, melhores)
+    escrever_csv(ARQ_RESTANTE, ["palavra", "posicao", "motivo"] + metricas, restante)
+    print("Melhores: %d | Restante: %d | planilhas em %s" % (len(melhores), len(restante), os.path.relpath(PASTA_SAIDA, PASTA)))
 
 
 # ---------------------------------------------------------------- 3. baixar
 
-def carregar_pular():
-    if not os.path.exists(ARQ_PULAR):
-        return set()
-    with open(ARQ_PULAR, encoding="utf-8") as f:
-        return {l.strip() for l in f if l.strip() and not l.startswith("#")}
-
-
 def baixar(config):
-    if not os.path.exists(ARQ_MELHORES_JSON):
-        falhar("não achei resultados/melhores.json. Rode primeiro: python3 minerar.py filtrar")
+    if not os.path.exists(ARQ_MELHORES_JSON) or not os.path.exists(ARQ_RESTANTE_JSON):
+        falhar("não achei os resultados do filtro. Rode primeiro: python3 minerar.py filtrar")
     if shutil.which("yt-dlp"):
         ytdlp = ["yt-dlp"]
     elif subprocess.run([sys.executable, "-m", "yt_dlp", "--version"], capture_output=True).returncode == 0:
@@ -407,19 +403,25 @@ def baixar(config):
                "  Qualquer sistema: python3 -m pip install yt-dlp")
     with open(ARQ_MELHORES_JSON, encoding="utf-8") as f:
         melhores = json.load(f)
-    pular = carregar_pular()
-    lista = [v for v in melhores if v["url"] not in pular]
-    if pular:
-        print("Pulando %d vídeo(s) listados em resultados/pular.txt" % (len(melhores) - len(lista)))
+    with open(ARQ_RESTANTE_JSON, encoding="utf-8") as f:
+        restante = json.load(f)
+
+    # Melhores primeiro, para o que mais importa chegar antes. Carrossel de fotos
+    # não é vídeo e não é baixado; fica na planilha.
+    fila = [(v, "melhores") for v in melhores] + [(v, "restante") for v in restante if not v["slideshow"]]
+    fotos = sum(1 for v in restante if v["slideshow"])
+    print("Vídeos para baixar: %d (%d melhores + %d restante)" % (len(fila), len(melhores), len(fila) - len(melhores)))
+    if fotos:
+        print("Carrosséis de fotos (não são vídeo, ficam só na planilha): %d" % fotos)
 
     # Vídeo no top de mais de um termo é baixado uma vez e aparece na pasta de
     # cada termo por link de arquivo, que não ocupa espaço duas vezes.
     ok, existentes, ligados, falhas = 0, 0, 0, []
     baixado_em = {}
-    for n, v in enumerate(lista, 1):
-        pasta = os.path.join(PASTA_VIDEOS, limpar_nome(v["palavra"]))
+    for n, (v, grupo) in enumerate(fila, 1):
+        pasta = os.path.join(PASTA_SAIDA, limpar_nome(v["palavra"]), grupo)
         os.makedirs(pasta, exist_ok=True)
-        nome = "%02d_%s-views_%s_%s.mp4" % (v.get("rank", n), humano(v["views"]), limpar_nome(v["autor"]), v["id"])
+        nome = "%02d_%s-views_%s_%s.mp4" % (v["posicao"], humano(v["views"]), limpar_nome(v["autor"]), v["id"])
         destino = os.path.join(pasta, nome)
         if os.path.exists(destino):
             existentes += 1
@@ -432,7 +434,7 @@ def baixar(config):
                 shutil.copy2(baixado_em[v["id"]], destino)
             ligados += 1
             continue
-        print("[%d/%d] %s" % (n, len(lista), nome))
+        print("[%d/%d] %s/%s/%s" % (n, len(fila), limpar_nome(v["palavra"]), grupo, nome))
         # O TikTok às vezes devolve uma página de desafio em vez do vídeo. Tentar de novo resolve.
         erro = "erro desconhecido"
         for tentativa in range(1, TENTATIVAS_DOWNLOAD + 1):
@@ -454,8 +456,9 @@ def baixar(config):
             print("    falhou: %s" % erro[:120])
         time.sleep(PAUSA_ENTRE_VIDEOS_S)
 
-    print("Baixados: %d | já existiam: %d | repetidos entre termos (sem baixar de novo): %d | falharam: %d | pasta: %s" % (
-        ok, existentes, ligados, len(falhas), PASTA_VIDEOS))
+    print("\nBaixados: %d | já existiam: %d | repetidos entre termos (sem baixar de novo): %d | falharam: %d" % (
+        ok, existentes, ligados, len(falhas)))
+    print("Pasta pronta: %s" % PASTA_SAIDA)
     if falhas:
         with open(os.path.join(PASTA_RESULTADOS, "falhas_download.txt"), "w", encoding="utf-8") as f:
             for url, erro in falhas:
@@ -493,7 +496,6 @@ def main():
     else:
         print(__doc__)
         sys.exit(1)
-    print("\n" + ASSINATURA)
 
 
 if __name__ == "__main__":
