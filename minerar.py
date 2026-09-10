@@ -306,20 +306,14 @@ def filtrar(config):
     with open(ARQ_BRUTO, encoding="utf-8") as f:
         brutos = json.load(f)["itens"]
 
-    # Mesmo vídeo pode aparecer em mais de um termo. Fica no primeiro,
-    # e os outros termos que também o acharam vão numa coluna.
-    vistos = {}
+    # Cada termo tem o seu próprio ranking, como se fossem buscas separadas no
+    # TikTok. Um vídeo achado por dois termos aparece nos dois, e a coluna
+    # tambem_achado_por diz quais outros termos o acharam. O download baixa uma vez.
+    achado_por = {}
     for item in brutos:
-        v = normalizar(item)
-        if not v["id"] or not v["url"]:
-            continue
-        if v["id"] in vistos:
-            outros = vistos[v["id"]]["tambem_achado_por"]
-            if v["palavra"] not in outros:
-                outros.append(v["palavra"])
-            continue
-        v["tambem_achado_por"] = []
-        vistos[v["id"]] = v
+        achado_por.setdefault(str(item.get("id") or ""), [])
+        if item.get("palavra") not in achado_por[str(item.get("id") or "")]:
+            achado_por[str(item.get("id") or "")].append(item.get("palavra"))
 
     hoje = datetime.date.today()
 
@@ -343,7 +337,11 @@ def filtrar(config):
         return ""
 
     por_palavra = {}
-    for v in vistos.values():
+    for item in brutos:
+        v = normalizar(item)
+        if not v["id"] or not v["url"]:
+            continue
+        v["tambem_achado_por"] = ", ".join(p for p in achado_por[v["id"]] if p != v["palavra"])
         por_palavra.setdefault(v["palavra"], []).append(v)
 
     melhores, restante, excluidos = [], [], {}
@@ -371,22 +369,21 @@ def filtrar(config):
 
     if excluidos:
         print("Excluídos antes do ranking: " + ", ".join("%s (%d)" % (m, n) for m, n in excluidos.items()))
-    duplicados = len(brutos) - len(vistos)
-    if duplicados:
-        print("Vídeos achados por mais de um termo: %d (contados uma vez, coluna tambem_achado_por)" % duplicados)
+    repetidos = sum(1 for lista in achado_por.values() if len(lista) > 1)
+    if repetidos:
+        print("Vídeos achados por mais de um termo: %d (aparecem em cada termo, baixados uma vez)" % repetidos)
+    unicos = len({v["id"] for v in melhores})
 
     restante.sort(key=lambda x: (x["palavra"], -x["views"]))
     os.makedirs(PASTA_RESULTADOS, exist_ok=True)
-    for v in melhores + restante:
-        v["tambem_achado_por"] = ", ".join(v["tambem_achado_por"])
     with open(ARQ_MELHORES_JSON, "w", encoding="utf-8") as f:
         json.dump(melhores, f, ensure_ascii=False, indent=1)
     metricas = ["views", "likes", "comentarios", "shares", "salvos", "engajamento_pct",
                 "duracao_s", "data", "idioma", "autor", "seguidores", "texto", "url", "tambem_achado_por"]
     escrever_csv(ARQ_MELHORES, ["palavra", "rank"] + metricas, melhores)
     escrever_csv(ARQ_RESTANTE, ["palavra", "motivo"] + metricas, restante)
-    print("Melhores: %d vídeos em %s" % (len(melhores), os.path.relpath(ARQ_MELHORES, PASTA)))
-    print("Restante: %d vídeos em %s (nada é descartado, você pagou por eles)" % (len(restante), os.path.relpath(ARQ_RESTANTE, PASTA)))
+    print("Melhores: %d linhas, %d vídeos diferentes, em %s" % (len(melhores), unicos, os.path.relpath(ARQ_MELHORES, PASTA)))
+    print("Restante: %d linhas em %s (nada é descartado, você pagou por eles)" % (len(restante), os.path.relpath(ARQ_RESTANTE, PASTA)))
 
 
 # ---------------------------------------------------------------- 3. baixar
@@ -411,9 +408,16 @@ def baixar(config):
     with open(ARQ_MELHORES_JSON, encoding="utf-8") as f:
         melhores = json.load(f)
     pular = carregar_pular()
-    lista = [v for v in melhores if v["url"] not in pular]
+    lista, ja = [], set()
+    for v in melhores:
+        if v["url"] in pular or v["id"] in ja:
+            continue
+        ja.add(v["id"])
+        lista.append(v)
     if pular:
-        print("Pulando %d vídeo(s) listados em resultados/pular.txt" % (len(melhores) - len(lista)))
+        print("Pulando %d vídeo(s) listados em resultados/pular.txt" % sum(1 for v in melhores if v["url"] in pular))
+    if len(melhores) - len(lista) - sum(1 for v in melhores if v["url"] in pular) > 0:
+        print("Vídeos no top de mais de um termo são baixados uma vez, na pasta do primeiro termo.")
 
     ok, existentes, falhas = 0, 0, []
     for n, v in enumerate(lista, 1):

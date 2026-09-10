@@ -140,9 +140,10 @@ cada item com `"palavra"` e salve tudo em `resultados/bruto.json`.
 **filtrar**: campos de cada item: `id`, `text`, `createTimeISO`,
 `webVideoUrl`, `playCount`, `diggCount`, `commentCount`, `shareCount`,
 `collectCount`, `isAd`, `isSlideshow`, `textLanguage`, `authorMeta.name`,
-`authorMeta.fans`, `videoMeta.duration`. Vídeo achado por mais de um termo
-conta uma vez, no primeiro, e os outros termos vão na coluna
-`tambem_achado_por`. Exclui do ranking só anúncio, slideshow e, se
+`authorMeta.fans`, `videoMeta.duration`. Cada termo tem o seu próprio
+ranking, como buscas separadas: vídeo achado por mais de um termo aparece em
+cada um deles, e a coluna `tambem_achado_por` lista os outros termos. Exclui
+do ranking só anúncio, slideshow e, se
 configurado, duração acima de `duracao_maxima_s` e idade acima de
 `idade_maxima_meses`. O resto é ordenado por `playCount`; os `top_por_palavra`
 de cada termo ganham `rank` e vão para `resultados/melhores.json` e
@@ -155,7 +156,8 @@ termo e views. Nenhum vídeo do bruto fica fora das duas planilhas. Imprime a
 tabela termo, brutos, melhores, restante.
 
 **baixar**: para cada item de `melhores.json` cuja URL não esteja em
-`resultados/pular.txt`, rode
+`resultados/pular.txt`, pulando id já baixado (vídeo no top de dois termos
+baixa uma vez, na pasta do primeiro), rode
 `yt-dlp --no-warnings --quiet --no-progress --no-playlist -o DESTINO URL`
 com DESTINO `videos/<termo>/<rank 2 dígitos>_<views humano>-views_<autor>_<id>.mp4`.
 O TikTok às vezes devolve uma página de desafio em vez do vídeo, então tente
