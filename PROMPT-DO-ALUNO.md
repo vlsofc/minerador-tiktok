@@ -156,8 +156,9 @@ termo e views. Nenhum vídeo do bruto fica fora das duas planilhas. Imprime a
 tabela termo, brutos, melhores, restante.
 
 **baixar**: para cada item de `melhores.json` cuja URL não esteja em
-`resultados/pular.txt`, pulando id já baixado (vídeo no top de dois termos
-baixa uma vez, na pasta do primeiro), rode
+`resultados/pular.txt`, rode (vídeo no top de dois termos baixa uma vez e
+aparece na pasta de cada termo por link de arquivo, `os.link`, com cópia se o
+disco não aceitar)
 `yt-dlp --no-warnings --quiet --no-progress --no-playlist -o DESTINO URL`
 com DESTINO `videos/<termo>/<rank 2 dígitos>_<views humano>-views_<autor>_<id>.mp4`.
 O TikTok às vezes devolve uma página de desafio em vez do vídeo, então tente

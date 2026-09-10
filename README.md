@@ -35,7 +35,8 @@ python3 minerar.py baixar            # grátis, vídeos em videos/<termo>/
   descartado, o aluno pagou por esses dados.
 - Cada termo tem o seu próprio top, como buscas separadas no TikTok. Vídeo
   achado por mais de um termo aparece em cada um, com os outros termos na
-  coluna `tambem_achado_por`, e é baixado uma vez, na pasta do primeiro.
+  coluna `tambem_achado_por`. É baixado uma vez e aparece na pasta de cada
+  termo por link de arquivo, sem ocupar espaço duas vezes.
 - `resultados/pular.txt` (opcional): URLs que o download deve pular. É onde o
   agente anota os vídeos fora do tema que o aluno mandou tirar.
 

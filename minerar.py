@@ -408,18 +408,14 @@ def baixar(config):
     with open(ARQ_MELHORES_JSON, encoding="utf-8") as f:
         melhores = json.load(f)
     pular = carregar_pular()
-    lista, ja = [], set()
-    for v in melhores:
-        if v["url"] in pular or v["id"] in ja:
-            continue
-        ja.add(v["id"])
-        lista.append(v)
+    lista = [v for v in melhores if v["url"] not in pular]
     if pular:
-        print("Pulando %d vídeo(s) listados em resultados/pular.txt" % sum(1 for v in melhores if v["url"] in pular))
-    if len(melhores) - len(lista) - sum(1 for v in melhores if v["url"] in pular) > 0:
-        print("Vídeos no top de mais de um termo são baixados uma vez, na pasta do primeiro termo.")
+        print("Pulando %d vídeo(s) listados em resultados/pular.txt" % (len(melhores) - len(lista)))
 
-    ok, existentes, falhas = 0, 0, []
+    # Vídeo no top de mais de um termo é baixado uma vez e aparece na pasta de
+    # cada termo por link de arquivo, que não ocupa espaço duas vezes.
+    ok, existentes, ligados, falhas = 0, 0, 0, []
+    baixado_em = {}
     for n, v in enumerate(lista, 1):
         pasta = os.path.join(PASTA_VIDEOS, limpar_nome(v["palavra"]))
         os.makedirs(pasta, exist_ok=True)
@@ -427,6 +423,14 @@ def baixar(config):
         destino = os.path.join(pasta, nome)
         if os.path.exists(destino):
             existentes += 1
+            baixado_em.setdefault(v["id"], destino)
+            continue
+        if v["id"] in baixado_em:
+            try:
+                os.link(baixado_em[v["id"]], destino)
+            except OSError:
+                shutil.copy2(baixado_em[v["id"]], destino)
+            ligados += 1
             continue
         print("[%d/%d] %s" % (n, len(lista), nome))
         # O TikTok às vezes devolve uma página de desafio em vez do vídeo. Tentar de novo resolve.
@@ -437,6 +441,7 @@ def baixar(config):
                 capture_output=True, text=True)
             if r.returncode == 0 and os.path.exists(destino):
                 ok += 1
+                baixado_em[v["id"]] = destino
                 break
             linhas = (r.stderr or r.stdout).strip().splitlines()
             erro = linhas[-1] if linhas else erro
@@ -449,7 +454,8 @@ def baixar(config):
             print("    falhou: %s" % erro[:120])
         time.sleep(PAUSA_ENTRE_VIDEOS_S)
 
-    print("Baixados: %d | já existiam: %d | falharam: %d | pasta: %s" % (ok, existentes, len(falhas), PASTA_VIDEOS))
+    print("Baixados: %d | já existiam: %d | repetidos entre termos (sem baixar de novo): %d | falharam: %d | pasta: %s" % (
+        ok, existentes, ligados, len(falhas), PASTA_VIDEOS))
     if falhas:
         with open(os.path.join(PASTA_RESULTADOS, "falhas_download.txt"), "w", encoding="utf-8") as f:
             for url, erro in falhas:
