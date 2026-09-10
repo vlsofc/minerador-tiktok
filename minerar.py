@@ -3,21 +3,25 @@
 Minerador de vídeos do TikTok.
 Criado por Matheus Valois. Instagram: @matheusvalois. Siga para mais ferramentas assim.
 
+Faz o que você faria na mão: pesquisa cada termo no TikTok, pega os vídeos que
+aparecem, ordena por views, separa os melhores de cada termo e baixa.
+
 Uso:
-  python3 minerar.py estimar   mostra quanto a busca vai custar, sem gastar nada
+  python3 minerar.py estimar   mostra quanto a busca vai custar e confere o token, sem gastar nada
   python3 minerar.py buscar    busca no TikTok via Apify (gasta crédito da Apify)
-  python3 minerar.py filtrar   filtra e gera as duas planilhas (grátis, pode repetir à vontade)
-  python3 minerar.py baixar    baixa os vídeos aprovados com yt-dlp (grátis)
-  python3 minerar.py tudo      os três passos em sequência
+  python3 minerar.py filtrar   ordena por views e gera as duas planilhas (grátis, pode repetir)
+  python3 minerar.py baixar    baixa os melhores com yt-dlp (grátis)
+  python3 minerar.py tudo      os três últimos em sequência
 
 Opções:
   --pais XX                    país de onde a busca é feita (BR, US, PT, MX...). Fica salvo no config.json
   --confirmado                 o usuário já confirmou o custo, não pergunta de novo
 
 Arquivos que você edita:
-  palavras.txt   uma palavra-chave por linha
-  config.json    filtros (views mínimas, idade máxima, quantos por palavra, modo busca ou hashtag...)
-  .env           APIFY_TOKEN=seu_token
+  palavras.txt          um termo de pesquisa por linha, do jeito que você digitaria no TikTok
+  config.json           quantos vídeos buscar por termo, quantos guardar como melhores, país
+  .env                  APIFY_TOKEN=seu_token
+  resultados/pular.txt  (opcional) URLs que você não quer baixar, uma por linha
 
 Não precisa instalar nenhuma biblioteca Python. Só precisa do yt-dlp para baixar.
 """
@@ -31,7 +35,6 @@ import subprocess
 import sys
 import time
 import urllib.error
-import urllib.parse
 import urllib.request
 
 PASTA = os.path.dirname(os.path.abspath(__file__))
@@ -41,9 +44,10 @@ ARQ_ENV = os.path.join(PASTA, ".env")
 PASTA_RESULTADOS = os.path.join(PASTA, "resultados")
 PASTA_VIDEOS = os.path.join(PASTA, "videos")
 ARQ_BRUTO = os.path.join(PASTA_RESULTADOS, "bruto.json")
-ARQ_APROVADOS = os.path.join(PASTA_RESULTADOS, "aprovados.json")
+ARQ_MELHORES_JSON = os.path.join(PASTA_RESULTADOS, "melhores.json")
 ARQ_MELHORES = os.path.join(PASTA_RESULTADOS, "planilha_melhores.csv")
 ARQ_RESTANTE = os.path.join(PASTA_RESULTADOS, "planilha_restante.csv")
+ARQ_PULAR = os.path.join(PASTA_RESULTADOS, "pular.txt")
 
 ASSINATURA = "Feito por @matheusvalois. Siga no Instagram para mais ferramentas assim."
 
@@ -52,29 +56,27 @@ ACTOR = "clockworks~tiktok-scraper"
 
 # Preços do plano gratuito da Apify em 09/2026. Planos pagos são mais baratos.
 PRECO_RESULTADO = 0.0037
-PRECO_FILTRO = 0.0013
+PRECO_PAIS = 0.0013
 PRECO_INICIO_RUN = 0.001
 
 TENTATIVAS_DOWNLOAD = 3
 PAUSA_ENTRE_TENTATIVAS_S = 3
 PAUSA_ENTRE_VIDEOS_S = 2
 
+# A busca vai por relevância e sem filtro de data de propósito. Testado em 09/2026:
+# o filtro de data do TikTok devolve um poço raso de vídeos fracos, e a ordenação
+# por curtidas não é respeitada. Relevância sem data traz os vídeos grandes.
+ORDENACAO = "MOST_RELEVANT"
+PERIODO = "ALL_TIME"
+
 CONFIG_PADRAO = {
-    "modo": "busca",
-    "resultados_por_palavra": 50,
-    "periodo": "ALL_TIME",
-    "ordenar_busca_por": "MOST_RELEVANT",
-    "idade_maxima_meses": 6,
     "pais": "BR",
-    "idiomas": [],
-    "paises": [],
-    "views_minimas": 100000,
-    "likes_minimos": 0,
-    "duracao_minima_s": 5,
-    "duracao_maxima_s": 90,
+    "resultados_por_palavra": 50,
+    "top_por_palavra": 20,
+    "idade_maxima_meses": 0,
+    "duracao_maxima_s": 0,
     "ignorar_anuncios": True,
     "ignorar_slideshows": True,
-    "top_por_palavra": 20,
 }
 
 PAISES_ACEITOS = set("""AF AL DZ AS AD AO AI AG AR AM AU AT AZ BS BH BB BY BE BZ BJ BM BT BO BA BW BR VG BN BG BF BI KH CM CA
@@ -82,9 +84,6 @@ CV KY TD CL CO CK CR HR CY CZ CD DK DJ DO EC EG SV EE ET FK FJ FI FR PF GA GE DE
 IQ IE IM IL IT CI JM JP JE KZ KE XK KW LA LV LB LS LR LY LT LU MO MG MW MY MV ML MT MH MQ MR MU MX MD MC MN ME MA MZ MM NA
 NR NP NL NZ NI NG MK NO OM PS PA PG PY PE PH PL PT PR QA CG RO RU RW RE KN LC MF PM VC SM SA SN RS SL SG SX SK SB SO ZA KR
 ES LK SR SZ SE CH TW TJ TZ TH TG TO TT TN TR TC TV VI UG UA AE GB US UY VE VN WF YE ZM ZW AX""".split())
-
-PERIODOS = ["ALL_TIME", "PAST_24_HOURS", "PAST_WEEK", "PAST_MONTH", "LAST_3_MONTHS", "LAST_6_MONTHS"]
-ORDENACOES = ["MOST_RELEVANT", "MOST_LIKED", "LATEST"]
 
 
 # ---------------------------------------------------------------- utilidades
@@ -99,7 +98,7 @@ def carregar_config():
     if not os.path.exists(ARQ_CONFIG):
         with open(ARQ_CONFIG, "w", encoding="utf-8") as f:
             json.dump(CONFIG_PADRAO, f, ensure_ascii=False, indent=2)
-        print("Criei o config.json com os filtros padrão. Edite ele se quiser mudar views mínimas, período etc.\n")
+        print("Criei o config.json com os valores padrão.\n")
     with open(ARQ_CONFIG, encoding="utf-8") as f:
         try:
             config.update(json.load(f))
@@ -107,18 +106,23 @@ def carregar_config():
             falhar("config.json inválido: %s" % e)
     if config["pais"] and config["pais"] not in PAISES_ACEITOS:
         falhar("país '%s' não é aceito. Use o código de 2 letras: BR, US, PT, MX, ES, AR, GB..." % config["pais"])
-    if config.get("modo") not in ("busca", "hashtag"):
-        falhar("modo inválido no config.json. Use \"busca\" (termo de pesquisa) ou \"hashtag\".")
-    if config["periodo"] not in PERIODOS:
-        falhar("periodo inválido no config.json. Use um destes: %s" % ", ".join(PERIODOS))
-    if config["ordenar_busca_por"] not in ORDENACOES:
-        falhar("ordenar_busca_por inválido no config.json. Use um destes: %s" % ", ".join(ORDENACOES))
     return config
+
+
+def salvar_pais(pais):
+    if pais not in PAISES_ACEITOS:
+        falhar("--pais precisa do código de 2 letras: BR, US, PT, MX, ES, AR, GB...")
+    with open(ARQ_CONFIG, encoding="utf-8") as f:
+        salvo = json.load(f)
+    salvo["pais"] = pais
+    with open(ARQ_CONFIG, "w", encoding="utf-8") as f:
+        json.dump(salvo, f, ensure_ascii=False, indent=2)
+    print("País da busca salvo no config.json: %s\n" % pais)
 
 
 def carregar_palavras():
     if not os.path.exists(ARQ_PALAVRAS):
-        falhar("não achei palavras.txt. Crie o arquivo com uma palavra-chave por linha.")
+        falhar("não achei palavras.txt. Crie o arquivo com um termo de pesquisa por linha.")
     with open(ARQ_PALAVRAS, encoding="utf-8") as f:
         palavras = [l.strip() for l in f if l.strip() and not l.startswith("#")]
     if not palavras:
@@ -175,15 +179,8 @@ def limpar_nome(s):
 
 
 def estimar_custo(config, n_palavras):
-    por_resultado = PRECO_RESULTADO
-    if config["modo"] == "busca" and config["periodo"] != "ALL_TIME":
-        por_resultado += PRECO_FILTRO
-    if config["modo"] == "busca" and config["ordenar_busca_por"] != "MOST_RELEVANT":
-        por_resultado += PRECO_FILTRO
-    if config["pais"]:
-        por_resultado += PRECO_FILTRO
-    total = n_palavras * (config["resultados_por_palavra"] * por_resultado + PRECO_INICIO_RUN)
-    return total
+    por_resultado = PRECO_RESULTADO + (PRECO_PAIS if config["pais"] else 0)
+    return n_palavras * (config["resultados_por_palavra"] * por_resultado + PRECO_INICIO_RUN)
 
 
 # ---------------------------------------------------------------- 1. buscar
@@ -191,15 +188,9 @@ def estimar_custo(config, n_palavras):
 def estimar(config):
     palavras = carregar_palavras()
     custo = estimar_custo(config, len(palavras))
-    print("Palavras-chave (%d): %s" % (len(palavras), ", ".join(palavras)))
+    print("Termos (%d): %s" % (len(palavras), ", ".join(palavras)))
     print("Busca feita a partir de: %s" % (config["pais"] or "sem país definido (resultados vêm misturados)"))
-    if config["modo"] == "hashtag":
-        print("Modo: página da hashtag | %d vídeos por hashtag" % config["resultados_por_palavra"])
-    else:
-        print("Modo: busca por termo | %d por palavra | ordenação %s | filtro de data na busca: %s" % (
-            config["resultados_por_palavra"], config["ordenar_busca_por"], config["periodo"]))
-    if config["idade_maxima_meses"]:
-        print("Depois da busca, vídeos com mais de %d meses vão para a planilha do restante." % config["idade_maxima_meses"])
+    print("Vídeos por termo: %d | melhores guardados por termo: %d" % (config["resultados_por_palavra"], config["top_por_palavra"]))
     print("Custo estimado na Apify (plano gratuito): %s" % dolar(custo))
     token = carregar_token()
     conta = api("GET", "/users/me", token)["data"]
@@ -217,24 +208,17 @@ def buscar(config, confirmado=False):
             print("Cancelado.")
             return
 
-    # Um run por palavra, assim cada vídeo já sai etiquetado com a palavra que o achou.
+    # Um run por termo, assim cada vídeo já sai etiquetado com o termo que o achou.
     runs = {}
     for palavra in palavras:
-        if config["modo"] == "hashtag":
-            entrada = {
-                "hashtags": [palavra.lstrip("#").replace(" ", "")],
-                "resultsPerPage": config["resultados_por_palavra"],
-                "shouldDownloadVideos": False,
-            }
-        else:
-            entrada = {
-                "searchQueries": [palavra],
-                "searchSection": "/video",
-                "resultsPerPage": config["resultados_por_palavra"],
-                "videoSearchSorting": config["ordenar_busca_por"],
-                "videoSearchDateFilter": config["periodo"],
-                "shouldDownloadVideos": False,
-            }
+        entrada = {
+            "searchQueries": [palavra],
+            "searchSection": "/video",
+            "resultsPerPage": config["resultados_por_palavra"],
+            "videoSearchSorting": ORDENACAO,
+            "videoSearchDateFilter": PERIODO,
+            "shouldDownloadVideos": False,
+        }
         if config["pais"]:
             entrada["proxyCountryCode"] = config["pais"]
         resp = api("POST", "/acts/%s/runs" % ACTOR, token, entrada)
@@ -295,7 +279,6 @@ def normalizar(item):
         "duracao_s": video.get("duration") or 0,
         "data": (item.get("createTimeISO") or "")[:10],
         "idioma": item.get("textLanguage") or "",
-        "pais": item.get("locationCreated") or "",
         "autor": autor.get("name") or "",
         "seguidores": autor.get("fans") or 0,
         "texto": (item.get("text") or "").replace("\n", " ").strip(),
@@ -303,104 +286,6 @@ def normalizar(item):
         "anuncio": bool(item.get("isAd")),
         "slideshow": bool(item.get("isSlideshow")),
     }
-
-
-def filtrar(config):
-    if not os.path.exists(ARQ_BRUTO):
-        falhar("não achei resultados/bruto.json. Rode primeiro: python3 minerar.py buscar")
-    with open(ARQ_BRUTO, encoding="utf-8") as f:
-        brutos = json.load(f)["itens"]
-
-    # Mesmo vídeo pode aparecer em mais de uma palavra. Fica na primeira,
-    # e as outras palavras que também o acharam vão numa coluna.
-    vistos = {}
-    for item in brutos:
-        v = normalizar(item)
-        if not v["id"] or not v["url"]:
-            continue
-        if v["id"] in vistos:
-            outras = vistos[v["id"]]["tambem_achado_por"]
-            if v["palavra"] not in outras:
-                outras.append(v["palavra"])
-            continue
-        v["tambem_achado_por"] = []
-        vistos[v["id"]] = v
-
-    idiomas, paises = config.get("idiomas") or [], config.get("paises") or []
-    hoje = datetime.date.today()
-
-    def idade_meses(v):
-        try:
-            return (hoje - datetime.date.fromisoformat(v["data"])).days // 30
-        except ValueError:
-            return 0
-
-    def motivo_reprovacao(v):
-        if config["idade_maxima_meses"] and idade_meses(v) > config["idade_maxima_meses"]:
-            return "mais velho que %d meses" % config["idade_maxima_meses"]
-        # Passa se o texto está num idioma aceito OU o vídeo foi criado num país aceito.
-        if (idiomas or paises) and not (v["idioma"] in idiomas or v["pais"] in paises):
-            return "idioma %s / país %s" % (v["idioma"] or "?", v["pais"] or "?")
-        if config["ignorar_anuncios"] and v["anuncio"]:
-            return "anúncio"
-        if config["ignorar_slideshows"] and v["slideshow"]:
-            return "slideshow"
-        if v["views"] < config["views_minimas"]:
-            return "views abaixo de %s" % humano(config["views_minimas"])
-        if v["likes"] < config["likes_minimos"]:
-            return "likes abaixo de %s" % humano(config["likes_minimos"])
-        if v["duracao_s"] < config["duracao_minima_s"]:
-            return "mais curto que %ds" % config["duracao_minima_s"]
-        if v["duracao_s"] > config["duracao_maxima_s"]:
-            return "mais longo que %ds" % config["duracao_maxima_s"]
-        return ""
-
-    por_palavra = {}
-    for v in vistos.values():
-        grupo = por_palavra.setdefault(v["palavra"], {"aprovados": [], "reprovados": []})
-        motivo = motivo_reprovacao(v)
-        if motivo:
-            v["motivo"] = "reprovado: " + motivo
-            grupo["reprovados"].append(v)
-        else:
-            grupo["aprovados"].append(v)
-
-    melhores, restante, motivos = [], [], {}
-    print("%-30s %7s %9s %8s %6s" % ("palavra", "brutos", "aprovados", "no top", "taxa"))
-    for palavra, grupo in por_palavra.items():
-        aprovados = sorted(grupo["aprovados"], key=lambda x: x["views"], reverse=True)
-        top = aprovados[: config["top_por_palavra"]]
-        for i, v in enumerate(top, 1):
-            v["rank"] = i
-        melhores.extend(top)
-        for v in aprovados[config["top_por_palavra"]:]:
-            v["motivo"] = "aprovado, fora do top %d" % config["top_por_palavra"]
-            restante.append(v)
-        for v in sorted(grupo["reprovados"], key=lambda x: x["views"], reverse=True):
-            resumo = "idioma/país fora do filtro" if v["motivo"].startswith("reprovado: idioma") else v["motivo"]
-            motivos[resumo] = motivos.get(resumo, 0) + 1
-            restante.append(v)
-        brutos_palavra = len(aprovados) + len(grupo["reprovados"])
-        taxa = len(aprovados) / brutos_palavra * 100 if brutos_palavra else 0
-        print("%-30s %7d %9d %8d %5.0f%%" % (palavra, brutos_palavra, len(aprovados), len(top), taxa))
-
-    if motivos:
-        print("Reprovados por motivo: " + ", ".join("%s (%d)" % (m.replace("reprovado: ", ""), n) for m, n in motivos.items()))
-    duplicados = len(brutos) - len(vistos)
-    if duplicados:
-        print("Vídeos achados por mais de uma palavra: %d (contados uma vez, coluna tambem_achado_por)" % duplicados)
-
-    os.makedirs(PASTA_RESULTADOS, exist_ok=True)
-    for v in list(melhores) + restante:
-        v["tambem_achado_por"] = ", ".join(v["tambem_achado_por"])
-    with open(ARQ_APROVADOS, "w", encoding="utf-8") as f:
-        json.dump(melhores, f, ensure_ascii=False, indent=1)
-    metricas = ["views", "likes", "comentarios", "shares", "salvos", "engajamento_pct",
-                "duracao_s", "data", "idioma", "pais", "autor", "seguidores", "texto", "url", "tambem_achado_por"]
-    escrever_csv(ARQ_MELHORES, ["palavra", "rank"] + metricas, melhores)
-    escrever_csv(ARQ_RESTANTE, ["palavra", "motivo"] + metricas, restante)
-    print("Melhores: %d vídeos em %s" % (len(melhores), os.path.relpath(ARQ_MELHORES, PASTA)))
-    print("Restante: %d vídeos em %s (nada é descartado, você pagou por eles)" % (len(restante), os.path.relpath(ARQ_RESTANTE, PASTA)))
 
 
 def escrever_csv(caminho, colunas, linhas):
@@ -411,11 +296,107 @@ def escrever_csv(caminho, colunas, linhas):
             w.writerow(linha)
 
 
+def filtrar(config):
+    if not os.path.exists(ARQ_BRUTO):
+        falhar("não achei resultados/bruto.json. Rode primeiro: python3 minerar.py buscar")
+    with open(ARQ_BRUTO, encoding="utf-8") as f:
+        brutos = json.load(f)["itens"]
+
+    # Mesmo vídeo pode aparecer em mais de um termo. Fica no primeiro,
+    # e os outros termos que também o acharam vão numa coluna.
+    vistos = {}
+    for item in brutos:
+        v = normalizar(item)
+        if not v["id"] or not v["url"]:
+            continue
+        if v["id"] in vistos:
+            outros = vistos[v["id"]]["tambem_achado_por"]
+            if v["palavra"] not in outros:
+                outros.append(v["palavra"])
+            continue
+        v["tambem_achado_por"] = []
+        vistos[v["id"]] = v
+
+    hoje = datetime.date.today()
+
+    def idade_meses(v):
+        try:
+            return (hoje - datetime.date.fromisoformat(v["data"])).days // 30
+        except ValueError:
+            return 0
+
+    # Só o que não é vídeo de gente (anúncio, carrossel de fotos) ou o que o
+    # usuário pediu explicitamente para limitar. O resto é decidido por views.
+    def motivo_exclusao(v):
+        if config["ignorar_anuncios"] and v["anuncio"]:
+            return "anúncio"
+        if config["ignorar_slideshows"] and v["slideshow"]:
+            return "slideshow (fotos, não vídeo)"
+        if config["duracao_maxima_s"] and v["duracao_s"] > config["duracao_maxima_s"]:
+            return "mais longo que %ds" % config["duracao_maxima_s"]
+        if config["idade_maxima_meses"] and idade_meses(v) > config["idade_maxima_meses"]:
+            return "mais velho que %d meses" % config["idade_maxima_meses"]
+        return ""
+
+    por_palavra = {}
+    for v in vistos.values():
+        por_palavra.setdefault(v["palavra"], []).append(v)
+
+    melhores, restante, excluidos = [], [], {}
+    top_n = config["top_por_palavra"]
+    print("%-30s %7s %9s %10s" % ("termo", "brutos", "melhores", "restante"))
+    for palavra, videos in por_palavra.items():
+        candidatos = []
+        for v in videos:
+            motivo = motivo_exclusao(v)
+            if motivo:
+                v["motivo"] = motivo
+                excluidos[motivo] = excluidos.get(motivo, 0) + 1
+                restante.append(v)
+            else:
+                candidatos.append(v)
+        candidatos.sort(key=lambda x: x["views"], reverse=True)
+        top = candidatos[:top_n]
+        for i, v in enumerate(top, 1):
+            v["rank"] = i
+        melhores.extend(top)
+        for v in candidatos[top_n:]:
+            v["motivo"] = "fora do top %d por views" % top_n
+            restante.append(v)
+        print("%-30s %7d %9d %10d" % (palavra, len(videos), len(top), len(videos) - len(top)))
+
+    if excluidos:
+        print("Excluídos antes do ranking: " + ", ".join("%s (%d)" % (m, n) for m, n in excluidos.items()))
+    duplicados = len(brutos) - len(vistos)
+    if duplicados:
+        print("Vídeos achados por mais de um termo: %d (contados uma vez, coluna tambem_achado_por)" % duplicados)
+
+    restante.sort(key=lambda x: (x["palavra"], -x["views"]))
+    os.makedirs(PASTA_RESULTADOS, exist_ok=True)
+    for v in melhores + restante:
+        v["tambem_achado_por"] = ", ".join(v["tambem_achado_por"])
+    with open(ARQ_MELHORES_JSON, "w", encoding="utf-8") as f:
+        json.dump(melhores, f, ensure_ascii=False, indent=1)
+    metricas = ["views", "likes", "comentarios", "shares", "salvos", "engajamento_pct",
+                "duracao_s", "data", "idioma", "autor", "seguidores", "texto", "url", "tambem_achado_por"]
+    escrever_csv(ARQ_MELHORES, ["palavra", "rank"] + metricas, melhores)
+    escrever_csv(ARQ_RESTANTE, ["palavra", "motivo"] + metricas, restante)
+    print("Melhores: %d vídeos em %s" % (len(melhores), os.path.relpath(ARQ_MELHORES, PASTA)))
+    print("Restante: %d vídeos em %s (nada é descartado, você pagou por eles)" % (len(restante), os.path.relpath(ARQ_RESTANTE, PASTA)))
+
+
 # ---------------------------------------------------------------- 3. baixar
 
+def carregar_pular():
+    if not os.path.exists(ARQ_PULAR):
+        return set()
+    with open(ARQ_PULAR, encoding="utf-8") as f:
+        return {l.strip() for l in f if l.strip() and not l.startswith("#")}
+
+
 def baixar(config):
-    if not os.path.exists(ARQ_APROVADOS):
-        falhar("não achei resultados/aprovados.json. Rode primeiro: python3 minerar.py filtrar")
+    if not os.path.exists(ARQ_MELHORES_JSON):
+        falhar("não achei resultados/melhores.json. Rode primeiro: python3 minerar.py filtrar")
     if shutil.which("yt-dlp"):
         ytdlp = ["yt-dlp"]
     elif subprocess.run([sys.executable, "-m", "yt_dlp", "--version"], capture_output=True).returncode == 0:
@@ -423,19 +404,23 @@ def baixar(config):
     else:
         falhar("yt-dlp não está instalado.\n  Mac:     brew install yt-dlp\n  Windows: winget install yt-dlp\n"
                "  Qualquer sistema: python3 -m pip install yt-dlp")
-    with open(ARQ_APROVADOS, encoding="utf-8") as f:
-        aprovados = json.load(f)
+    with open(ARQ_MELHORES_JSON, encoding="utf-8") as f:
+        melhores = json.load(f)
+    pular = carregar_pular()
+    lista = [v for v in melhores if v["url"] not in pular]
+    if pular:
+        print("Pulando %d vídeo(s) listados em resultados/pular.txt" % (len(melhores) - len(lista)))
 
-    ok, pulados, falhas = 0, 0, []
-    for n, v in enumerate(aprovados, 1):
+    ok, existentes, falhas = 0, 0, []
+    for n, v in enumerate(lista, 1):
         pasta = os.path.join(PASTA_VIDEOS, limpar_nome(v["palavra"]))
         os.makedirs(pasta, exist_ok=True)
         nome = "%02d_%s-views_%s_%s.mp4" % (v.get("rank", n), humano(v["views"]), limpar_nome(v["autor"]), v["id"])
         destino = os.path.join(pasta, nome)
         if os.path.exists(destino):
-            pulados += 1
+            existentes += 1
             continue
-        print("[%d/%d] %s" % (n, len(aprovados), nome))
+        print("[%d/%d] %s" % (n, len(lista), nome))
         # O TikTok às vezes devolve uma página de desafio em vez do vídeo. Tentar de novo resolve.
         erro = "erro desconhecido"
         for tentativa in range(1, TENTATIVAS_DOWNLOAD + 1):
@@ -456,7 +441,7 @@ def baixar(config):
             print("    falhou: %s" % erro[:120])
         time.sleep(PAUSA_ENTRE_VIDEOS_S)
 
-    print("Baixados: %d | já existiam: %d | falharam: %d | pasta: %s" % (ok, pulados, len(falhas), PASTA_VIDEOS))
+    print("Baixados: %d | já existiam: %d | falharam: %d | pasta: %s" % (ok, existentes, len(falhas), PASTA_VIDEOS))
     if falhas:
         with open(os.path.join(PASTA_RESULTADOS, "falhas_download.txt"), "w", encoding="utf-8") as f:
             for url, erro in falhas:
@@ -475,14 +460,10 @@ def main():
     if "--pais" in sys.argv:
         pos = sys.argv.index("--pais")
         pais = sys.argv[pos + 1].strip().upper() if len(sys.argv) > pos + 1 else ""
-        if pais not in PAISES_ACEITOS:
-            falhar("--pais precisa do código de 2 letras: BR, US, PT, MX, ES, AR, GB...")
+        salvar_pais(pais)
         config["pais"] = pais
-        salvo = json.load(open(ARQ_CONFIG, encoding="utf-8"))
-        salvo["pais"] = pais
-        with open(ARQ_CONFIG, "w", encoding="utf-8") as f:
-            json.dump(salvo, f, ensure_ascii=False, indent=2)
-        print("País da busca salvo no config.json: %s\n" % pais)
+        args = [a for a in args if a != pais and a != pais.lower()]
+        comando = args[0] if args else ""
     if comando == "estimar":
         estimar(config)
     elif comando == "buscar":
